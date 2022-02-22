@@ -1,0 +1,242 @@
+registry server/repository/image:tag
+
+centos
+
+index.docker.io/library/centos:latest
+
+
+
+
+container = 임시적이고, 삭제 가능한 인스턴스 
+
+docker run ( create --> start ) 
+docker rm -f ( stop ---> rm ) 
+
+
+
+docker container ps 
+	--> 실행 가능한 인스턴스 (runnable instance) = 프로세스 
+
+docker image ls 
+	--> 컨테이너 실행에 필요한 파일(들)
+
+
+형용사_명사 
+pretty_jenny 
+
+
+
+
+
+
+
+# docker container run -it --name c3 centos /bin/ping localhost
+# docker container run -d --name c4 centos /bin/ping localhost
+# docker container logs c4
+
+# docker container exec -it c4 ls -l /etc/passwd
+-rw-r--r-- 1 root root 703 Sep 15 14:17 /etc/passwd
+
+# docker container exec -it c4 /bin/bash
+[root@bdbc252554f2 /]# ps -ef
+UID        PID  PPID  C STIME TTY          TIME CMD
+root         1     0  0 23:49 ?        00:00:00 /bin/ping localhost
+root        21     0  0 23:54 pts/0    00:00:00 /bin/bash
+root        36    21  0 23:54 pts/0    00:00:00 ps -ef
+
+
+컨테이너 일괄 삭제 
+===============
+# docker rm -f $(docker ps -aq)
+
+
+컨테이너 이미지 생성 
+===============
+1. docker commit 
+	--> 템플렛 컨테이너 생성 ---- docer commit---> 이미지 
+
+# docker run -it --name template ubuntu
+	root@883ae0d019f8:/# apt-get update  (repository 의 pkg 정보 업데이트) 
+	root@883ae0d019f8:/# apt-get install -y nginx
+	root@883ae0d019f8:/# echo Hello world > /usr/share/nginx/html/index.html 
+	root@883ae0d019f8:~# useradd yumi
+	root@883ae0d019f8:~# ctrl+PQ 
+# docker container commit -a "Yu Mi" -m "NGINX web service"  template   web-image
+# docker container run -it web-image
+
+
+2. docker build 
+terminal2 # watch -n 1 docker ps -a
+
+# docker rm -f template stupefied_burnell
+# echo Hello world > index.html
+# cat Dockerfile
+FROM ubuntu
+RUN apt-get update && apt-get install -y -q nginx
+COPY index.html  /var/www/html/
+CMD ["nginx", "-g", "daemon off;" ]
+
+
+# docker build -t webserver .
+
+# docker image inspect webserver| less
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+kubernetes cluster 생성 
+==========================
+2-node cluster (master 1개, worker 1개) 
+
+CRI (Container Runtime Interface) 설치하기 
+-----------------------------------------------------	
+	--> 컨테이너 생성 담당 (docker)
+
+
+# apt-get install -y kubelet=1.21.0-00 kubeadm=1.21.0-00 kubectl=1.21.0-00
+
+
+
+
+master 
+IP : 10.0.2.101/24 
+hostname : master 
+
+worker1
+IP : 10.0.2.102/24 
+hostname : worker1
+
+
+
+
+master node 설정하기
+==============
+# hostnamectl set-hostname master 
+# hostname 
+master 
+
+# vi /etc/hosts 
+...
+10.0.2.101	master 
+10.0.2.102	worker1
+:wq
+
+
+
+worker node 설정하기 
+===============
+master 종료(poweroff) 
+
+Oralce VM VirtualBox 관리자 
+master 가상 머신 선택 
+	--> 우클릭 
+	--> 복제 
+
+	이름 : worker1 
+	*** MAC 주소 정책 : 모든 네트워크 어댑터의 새 MAC 주소 생성 
+
+	--> 다음 
+	--> 완전한 복제 --> 복제 
+
+
+worker1 
+ID : worker1 
+PW : ubuntu 
+
+$ su - root 
+# cd /etc/netplan 
+# vi 00-installer-config.yaml 
+	addresses: [10.0.2.101/24] 
+		--> addresses: [10.0.2.102/24]
+
+:wq
+
+# netplan apply 
+# ip addr 
+enp0s3
+	inet 10.0.2.102/24 
+
+# hostnamectl set-hostname worker1 
+# hostname 
+worker1 
+
+# vi /etc/hosts 
+...
+10.0.2.101	master 
+10.0.2.102	worker1
+:wq
+
+putty 연결을 위한 포트 포워딩 설정 
+-----------------------------------------
+
+Oracle VM VirtualBox 관리자 
+파일 
+	--> 환경설정
+	--> 네트워크 --> NatNetwork 선택 --> 톱니바퀴 --> 포트포워딩 --> [+]
+
+이름       프로토콜       호스트IP        호스트포트     게스트IP     게스트포트
+worker1     TCP         192.168.56.1       102          10.0.2.102       22
+
+	--> 확인 *  3
+
+
+
+putty 연결 
+-----------
+putty 실행 
+	master  선택 --> Load 
+	Hostname : 192.168.56.1	Port: 102
+
+	Saved Sessions : worker1
+	--> Save 
+
+
+
+
+
+
+
+
+# ps -ef | grep kubelet 
+# systemctl status kubelet 
+
+
+
+
+실습 파일 압축 풀기 
+==================
+# cd 
+# tar -zxvf k8s_lab.tgz 
+# cd k8s_lab 
+
+편한 실습 환경 구성 
+===============
+# vi ~/.bashrc 
+......
+source <(kubectl completion bash)       <--- 파일 마지막에 추가 
+alias k=kubectl
+
+
+
+watch -n 1 kubectl get pods -o wide 
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,39 @@
+# apt-get update    
+
+# sudo apt-get install -y  apt-transport-https ca-certificates curl software-properties-common
+https를 사용해서 레포지토리를 사용할 수 있도록 필요한 패키지를 설치한다. 
+
+
+# curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
+Docker 공식 리포지토리에서 패키지를 다운로드 받았을때 위변조 확인을 위한 GPG 키를 추가한다.
+
+# apt-key fingerprint
+/etc/apt/trusted.gpg
+--------------------
+pub   rsa4096 2017-02-22 [SCEA]
+      9DC8 5822 9FC7 DD38 854A  E2D8 8D81 803C 0EBF CD88
+uid           [ unknown] Docker Release (CE deb) <docker@docker.com>
+sub   rsa4096 2017-02-22 [S]
+
+Docker.com 의 GPG 키가 등록됐는지 확인한다. 
+
+
+
+
+# add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
+Docker 공식 저장소를 리포지토리로 등록한다.
+
+# grep docker /etc/apt/sources.list
+deb [arch=amd64] https://download.docker.com/linux/ubuntu bionic stable
+
+저장소 등록정보에 기록됐는지 확인한다. 
+
+
+# apt-get update    
+리포지토리 정보를 갱신
+
+# apt-get install -y docker-ce
+
+docker container engine 을 설치한다.
+
+

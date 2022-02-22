@@ -1,0 +1,115 @@
+실습 정리 
+================
+
+master # kubectl delete deploy --all
+master # kubectl delete svc --all
+
+master # watch -n 1 kubectl get pv,pvc,pods -o wide 
+
+
+
+/tmp  --> pod volume (pvc) <----> pvc <--> pv  : /mnt/k8s-pv (hostpath)
+
+
+NFS server (=master)
+
+
+master # pwd
+/root/k8s_lab/volume/nfs-static
+
+master # vi pv.yaml 
+.........
+  nfs:
+    server: 10.0.2.101
+    path: /k8s_share
+
+:wq
+
+pv --> pvc --> pod
+
+PV 반환 초기화 
+====================
+master # kubectl delete deploy volume-pod
+master # kubectl delete pvc pvc
+
+persistentvolume/pv       256Mi      RWO            Retain           Released   default/pvc  
+
+master # kubectl apply -f ~/k8s_lab/volume/pvc.yaml
+
+초기화 
+[ 수동 데이터 삭제 ] 
+master # kubectl delete pv pv
+master # kubectl apply -f ~/k8s_lab/volume/pv.yaml
+
+
+master # kubectl delete deploy --all
+master # kubectl delete pvc,pv --all
+
+
+
+
+statefulset 실습 
+===================
+master # watch -n 1 kubectl get sts,pv,pvc,pods -o wide
+
+master # vi statefulset.yaml 
+   nodeSelector:
+        kubernetes.io/hostname: worker1  <-- worker1 로 수정 
+:wq
+
+
+리눅스 사용자 인증 정보 추가 
+=====================
+
+master # useradd -d /home/tester -m tester
+
+master # mkdir /home/tester/.kube
+master # cp /etc/kubernetes/admin.conf /home/tester/.kube/config
+master # chown tester:tester  /home/tester/.kube/config
+
+master # vi /home/tester/.kube/config
+current-context: yumi@kubernetes   <-- 수정 
+
+master # su - tester
+
+$ kubectl get pods
+NAME                READY   STATUS    RESTARTS   AGE
+statefulset-app-0   1/1     Running   0          90m
+
+$ kubectl get nodes
+NAME      STATUS   ROLES                  AGE    VERSION
+master    Ready    control-plane,master   3d1h   v1.21.0
+worker1   Ready    <none>                 3d1h   v1.21.0
+
+$ kubectl get svc
+Error from server (Forbidden): services is forbidden: User "system:serviceaccount:default:yumi" cannot list resource "services" in API group "" in the namespace "default"
+
+
+
+
+정리 
+master # kubectl delete sts statefulset-app
+master # kubectl delete pvc,pv --all
+
+
+
+
+
+master # watch -n 1 kubectl get hpa,svc,deploy,pods -o wide
+
+
+
+
+HPA load generator 실행 구문 
+==========================
+kubectl run -i --tty load-generator --rm --image=busybox --restart=Never -- /bin/sh -c "while sleep 0.01; do wget -q -O- http://php-apache; done"
+
+
+
+
+
+
+
+
+
+

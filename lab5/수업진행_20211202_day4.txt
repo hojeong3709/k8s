@@ -1,0 +1,286 @@
+master # kubectl delete ds daemonset-app
+master # watch -n 1 kubectl get job,pods -o wide  
+
+
+
+cronjob 스케쥴 
+======================
+분(0-59)      시간(0-23)     날짜(1-31)      월(1-12)     요일(1: 월 ~ 5:금, 6:토 / 0,7 : 일)
+
+12월 2일 오후 3시 30분 
+	--> 30	15 	2	12    *
+
+월~금 사이 매일 오전 9시 정각 
+	--> 0	9	*	*	1-5
+
+매일 5분마다 
+	--> */5	*	*	*	*
+
+master # kubectl delete cronjob hello
+
+
+
+
+10.0.2.101:8080     --> 172.17.0.2:80 
+10.0.2.101:8181    --> 172.17.0.3:3306
+
+
+
+
+
+
+Service(ClusterIP) 실습 
+==================
+master # watch -n 1 kubectl get svc,deploy,pods -o wide
+master # kubectl apply -f hostname-server.yaml
+
+
+master # vi clusterip-hostname.yaml 
+  	ports:
+ 	 - protocol: TCP
+ 	   port: 80
+  	   targetPort: 80
+
+:wq!
+master # kubectl apply -f clusterip-hostname.yaml
+
+master # curl -sf http://192.168.235.142 | grep Hello
+        <p>Hello,  hostname-server-7c85cc96dc-mwjhn</p> </blockquote>
+
+master # curl -sf http://192.168.235.150 | grep Hello
+        <p>Hello,  hostname-server-7c85cc96dc-zd9tv</p> </blockquote>
+
+master # kubectl delete pods hostname-server-7c85cc96dc-mwjhn
+pod "hostname-server-7c85cc96dc-mwjhn" deleted
+
+
+
+
+
+master # curl -sf http://10.96.213.118 | grep Hello
+        <p>Hello,  hostname-server-7c85cc96dc-zd9tv</p> </blockquote>
+master #
+master # curl -sf http://10.96.213.118:80 | grep Hello
+        <p>Hello,  hostname-server-7c85cc96dc-twdtz</p> </blockquote>
+
+
+master # iptables -t nat -S  | grep hostname
+
+-A KUBE-SEP-BIVHGGL5FV4M5SZV -p tcp -m comment --comment "default/clusterip-hostname-service" -m tcp -j DNAT --to-destination 192.168.235.150:80
+
+-A KUBE-SEP-YRIWCOOPBYUBLOEM -p tcp -m comment --comment "default/clusterip-hostname-service" -m tcp -j DNAT --to-destination 192.168.235.145:80
+
+-A KUBE-SERVICES -d 10.96.213.118/32 -p tcp -m comment --comment "default/clusterip-hostname-service cluster IP" -m tcp --dport 80 -j KUBE-SVC-OUYLQREKC6TK7Y6H
+-A KUBE-SVC-OUYLQREKC6TK7Y6H -m comment --comment "default/clusterip-hostname-service" -m statistic --mode random --probability 0.50000000000 -j KUBE-SEP-YRIWCOOPBYUBLOEM
+-A KUBE-SVC-OUYLQREKC6TK7Y6H -m comment --comment "default/clusterip-hostname-service" -j KUBE-SEP-BIVHGGL5FV4M5SZV
+
+
+
+
+10.96.213.118/32 ---> 192.168.235.145:80 
+	           ---> 192.168.235.150:80
+
+
+
+master # kubectl scale deploy hostname-server --replicas=3
+master # iptables -t nat -S  | grep hostname
+
+-A KUBE-SERVICES -d 10.96.213.118/32 -p tcp -m comment --comment "default/clusterip-hostname-service cluster IP" -m tcp --dport 80 -j KUBE-SVC-OUYLQREKC6TK7Y6H
+-A KUBE-SVC-OUYLQREKC6TK7Y6H -m comment --comment "default/clusterip-hostname-service" -m statistic --mode random --probability 0.33333333349 -j KUBE-SEP-YRIWCOOPBYUBLOEM
+		(1/3  192.168.235.145:80) 
+
+-A KUBE-SVC-OUYLQREKC6TK7Y6H -m comment --comment "default/clusterip-hostname-service" -m statistic --mode random --probability 0.50000000000 -j KUBE-SEP-NPVKBA3TVBNAZV5B
+		(1/2 192.168.235.148:80)
+
+-A KUBE-SVC-OUYLQREKC6TK7Y6H -m comment --comment "default/clusterip-hostname-service" -j KUBE-SEP-BIVHGGL5FV4M5SZV
+		(192.168.235.150:80)
+
+---------------------------------
+master # curl -sf http://10.96.213.118 | grep Hello
+        <p>Hello,  hostname-server-7c85cc96dc-xf9c5</p> </blockquote>
+master #
+master # sleep 10
+master # curl -sf http://10.96.213.118 | grep Hello
+        <p>Hello,  hostname-server-7c85cc96dc-zd9tv</p> </blockquote>
+
+
+
+
+service (NodePort) 실습
+================
+master # kubectl delete svc clusterip-hostname-service
+master # vi nodeport.yaml
+ 	 ports:
+  	- protocol: TCP
+  	  port: 80       <--- 수정 
+   	  targetPort: 80
+   	  nodePort: 30080
+
+
+10.0.2.101:30080 --- -->  service (10.104.97.167:80) ------> pod (192.168.235.***:80) 
+10.0.2.102:30080
+
+
+Oracle VM virtualbox 관리자 
+파일 
+	--> 환경설정 	
+	--> 네트워크 --> NatNetwork --> 톱니바퀴 --> 포트포워딩 --> [+]
+
+이름         프로토콜    호스트IP     호스트포트  게스트IP   게스트포트
+hostname   TCP     192.168.56.1     30080     10.0.2.101  30080
+
+
+
+# iptables -t nat -S | grep hostname 
+
+-A KUBE-NODEPORTS -p tcp -m comment --comment "default/nodeport-hostname-service" -m tcp --dport 30080 -j KUBE-SVC-UGOXF7AU4SQKUFM5
+
+-A KUBE-SVC-UGOXF7AU4SQKUFM5 -m comment --comment "default/nodeport-hostname-service" -m statistic --mode random --probability 0.33333333349 -j KUBE-SEP-3BLQT6ZP3DMSPDGI
+-A KUBE-SVC-UGOXF7AU4SQKUFM5 -m comment --comment "default/nodeport-hostname-service" -m statistic --mode random --probability 0.50000000000 -j KUBE-SEP-J3DFMELBLTU6J7S2
+-A KUBE-SVC-UGOXF7AU4SQKUFM5 -m comment --comment "default/nodeport-hostname-service" -j KUBE-SEP-DF3QBZPXHCKLS72R
+
+
+
+
+
+
+
+
+
+Service(LoadBalancer) 실습
+=============================
+master # kubectl delete svc nodeport-hostname-service
+
+
+Oracle VM virtualbox 관리자 
+파일 
+	--> 환경설정 	
+	--> 네트워크 --> NatNetwork --> 톱니바퀴 --> 포트포워딩 --> [+]
+
+이름         프로토콜    호스트IP     호스트포트  게스트IP   게스트포트
+hostname   TCP     192.168.56.1    80           10.0.2.200  80
+
+chrome 
+http://192.168.56.1 
+
+
+
+blue/green 배포 실습 
+=======================
+master # kubectl delete svc headless-service
+master # kubectl delete deploy hostname-server
+master # kubectl delete pod testnet
+
+
+master # kubectl apply -f deploy-blue.yaml
+master # kubectl apply -f blue-green-svc.yaml
+
+
+blue-green-svc 
+  selector:
+    app: deploy-blue
+
+blue 
+      app: deploy-blue
+       release: stable
+green 
+        app: deploy-green
+        release: stable
+
+
+master # curl -sf http://10.0.2.101:30880 | grep Deploy
+        <p> This is BLUE Deployment. </p>
+
+
+master # kubectl edit svc blue-green-svc 
+  selector:
+    app: deploy-green  
+
+:wq
+
+master # curl -sf http://10.0.2.101:30880 | grep Deploy
+        <p> This is GREEN Deployment. </p>
+
+
+
+
+
+
+
+canary 배포 실습 
+====================
+master # kubectl delete deploy --all
+master # kubectl delete svc blue-green-svc
+master # pwd
+/root/k8s_lab/controller/deployment/deploy_canary
+
+master # kubectl apply -f deploy-blue.yaml
+deploy-blue 
+        app: webapp
+        release: stable
+
+master # kubectl apply -f blue-canary-svc.yaml
+
+  selector:
+    app: webapp
+
+master # curl -sf http://10.0.2.101:30880 | grep Deploy
+        <p> This is BLUE Deployment. </p>
+
+master # kubectl apply -f deploy-canary.yaml
+
+deploy-canary 
+        app: webapp
+        release: beta
+
+master # kubectl edit svc blue-canary-svc
+  selector:
+    release: stable 
+
+
+master # curl -sf http://10.0.2.101:30880 | grep Deploy
+        <p> This is BLUE Deployment. </p>
+
+master # kubectl delete svc blue-canary-svc
+master # kubectl delete deploy --all
+
+
+
+
+watch -n 1 kubectl get   ing,svc,deploy,pods -o wide 
+
+
+
+ingress controller  loadbalancer 타입 변경 
+===============================
+
+# kubectl edit -n ingress-nginx svc ingress-nginx-controller 
+
+  type: NodePort 
+	--> type: LoadBalancer 
+:wq
+
+master # kubectl get svc -n ingress-nginx
+NAME                                 TYPE           CLUSTER-IP       EXTERNAL-IP   PORT(S)                      AGE
+ingress-nginx-controller             LoadBalancer   10.109.209.166   10.0.2.200    80:32393/TCP,443:30746/TCP   13m
+ingress-nginx-controller-admission   ClusterIP      10.96.20.90      <none>        443/TCP                      13m
+
+
+master # vi /etc/hosts 
+10.0.2.200  	example.com
+10.0.2.200	color.com
+
+
+master # curl -sf http://example.com/green   | grep Deploy
+        <p> This is GREEN Deployment. </p>
+
+master # curl -sf http://color.com   | grep Deploy
+        <p> This is YELLOW Deployment. </p>
+
+
+
+
+
+
+
+

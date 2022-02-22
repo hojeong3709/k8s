@@ -1,0 +1,254 @@
+https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/install-kubeadm/
+
+1. 쿠버네티스 클러스터를 구성하기전 요구사항 확인
+A compatible Linux host. The Kubernetes project provides generic instructions for Linux distributions based on Debian and Red Hat, and those distributions without a package manager.
+2 GB or more of RAM per machine (any less will leave little room for your apps).
+2 CPUs or more.
+Full network connectivity between all machines in the cluster (public or private network is fine)
+Unique hostname, MAC address, and product_uuid for every node. 
+	- hostname : # hostname
+		# hostnamectl set-hostname worker1
+		# cat /etc/hosts  
+		192.168.137.101	master
+		192.168.137.102	worker1
+		192.168.137.103	worker2
+
+	- MAC address : # ip addr , # ifconfig
+	- product_uuid : # sudo cat /sys/class/dmi/id/product_uuid 
+  
+Certain ports are open on your machine
+
+
+2. kubelet 의 적절한 동작을 위해서 swap을 사용하지 않는다. 
+
+# swapon && cat /etc/fstab 
+# swapoff -a && sed -i '/swap/s/^/#/' /etc/fstab
+
+
+3. SELinux 와 방화벽을 해제한다. 
+# setenforce  0 
+# ufw disable 
+# systemctl stop firewalld 
+# systemctl disable firewalld 
+
+4. Linux 노드의 iptables가 bridged traffic을 정확하게 확인하고 제어 할 수 있도록 br_netfilter 모듈을 load하고 관련된 네트워크 파라미터를 설정한다. 
+
+1) br_netfilter 모듈 load 
+-------------------------------------------------
+# lsmod | grep br_netfilter
+# modprobe br_netfilter
+# lsmod | grep br_netfilter
+br_netfilter           24576  0
+bridge                155648  1 br_netfilter
+-------------------------------------------------
+
+2) 모듈과 네트워크 파라미터가 영구적으로 적재되도록 파일에 편집 
+-------------------------------------------------
+cat <<EOF | sudo tee /etc/modules-load.d/k8s.conf
+br_netfilter
+EOF
+
+cat <<EOF | sudo tee /etc/sysctl.d/k8s.conf
+net.bridge.bridge-nf-call-ip6tables = 1
+net.bridge.bridge-nf-call-iptables = 1
+EOF   
+sudo sysctl --system
+-------------------------------------------------
+
+3) 네트워크 파라미터 정보 변경 사항 확인 
+-------------------------------------------------
+# sysctl net.bridge.bridge-nf-call-iptables
+net.bridge.bridge-nf-call-iptables = 1
+# sysctl net.bridge.bridge-nf-call-ip6tables
+net.bridge.bridge-nf-call-ip6tables = 1
+-------------------------------------------------
+
+
+5. Installing kubeadm, kubelet and kubectl
+	- kubeadm: the command to bootstrap the cluster.
+	- kubelet: the component that runs on all of the machines in your cluster and does things like starting pods and containers.
+	- kubectl: the command line util to talk to your cluster.
+--------------------------------------
+Debian-based distributions 
+--------------------------------------
+1) Update the apt package index and install packages needed to use the Kubernetes apt repository:
+# sudo apt-get update
+# sudo apt-get install -y apt-transport-https ca-certificates curl
+
+2) Download the Google Cloud public signing key:
+# sudo curl -fsSLo /usr/share/keyrings/kubernetes-archive-keyring.gpg https://packages.cloud.google.com/apt/doc/apt-key.gpg
+
+3) Add the Kubernetes apt repository:
+# echo "deb [signed-by=/usr/share/keyrings/kubernetes-archive-keyring.gpg] https://apt.kubernetes.io/ kubernetes-xenial main" | sudo tee /etc/apt/sources.list.d/kubernetes.list
+
+4) Update apt package index, install kubelet, kubeadm and kubectl, and pin their version:
+
+# sudo apt-get update
+# sudo apt-get install -y kubelet kubeadm kubectl
+# sudo apt-mark hold kubelet kubeadm kubectl
+
+--------------------------------------
+Red Hat-based distributions
+--------------------------------------
+
+1) yum repository 에 kubernetes 정보 등록 
+---------------------------------------------------------------------------------------------------
+# cat <<EOF | sudo tee /etc/yum.repos.d/kubernetes.repo
+[kubernetes]
+name=Kubernetes
+baseurl=https://packages.cloud.google.com/yum/repos/kubernetes-el7-\$basearch
+enabled=1
+gpgcheck=1
+repo_gpgcheck=1
+gpgkey=https://packages.cloud.google.com/yum/doc/yum-key.gpg https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg
+exclude=kubelet kubeadm kubectl
+EOF
+---------------------------------------------------------------------------------------------------
+
+2) Set SELinux in permissive mode (effectively disabling it)
+# sudo setenforce 0
+# sudo sed -i 's/^SELINUX=enforcing$/SELINUX=permissive/' /etc/selinux/config
+
+3) yum 명령을 통해서 필요한 패키지를 설치 
+# sudo yum install -y kubelet kubeadm kubectl --disableexcludes=kubernetes
+
+4) kubelet 서비스를 부팅시 자동으로 시작되도록 등록하고 서비스를 시작한다.
+# sudo systemctl enable --now kubelet
+
+
+
+6. Configuring the kubelet cgroup driver (https://kubernetes.io/docs/setup/production-environment/container-runtimes/) 
+cgroupfs를 컨테이너 런타임과 kubelet 에 의해서 제어할 수 있도록 구성한다. 
+
+
+# sudo mkdir /etc/docker 
+---------------------------------------------------------------------------------------------------
+# cat <<EOF | sudo tee /etc/docker/daemon.json
+{
+  "exec-opts": ["native.cgroupdriver=systemd"],
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "100m"
+  },
+  "storage-driver": "overlay2"
+}
+EOF
+
+---------------------------------------------------------------------------------------------------
+sudo systemctl enable docker
+sudo systemctl daemon-reload
+sudo systemctl restart docker
+
+
+
+
+7. (마스터 노드에서만 실행 )kubeadm init 명령을 통해서 클러스터를 생성한다. 
+# kubeadm init 
+......
+Your Kubernetes control-plane has initialized successfully!
+
+To start using your cluster, you need to run the following as a regular user:
+
+  mkdir -p $HOME/.kube
+  sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+  sudo chown $(id -u):$(id -g) $HOME/.kube/config
+
+Alternatively, if you are the root user, you can run:
+
+  export KUBECONFIG=/etc/kubernetes/admin.conf                ( root 사용자의 홈디렉토리 쉘 환경파일에 편집)
+
+You should now deploy a pod network to the cluster.
+Run "kubectl apply -f [podnetwork].yaml" with one of the options listed at:
+  https://kubernetes.io/docs/concepts/cluster-administration/addons/
+
+Then you can join any number of worker nodes by running the following on each as root:
+
+kubeadm join 192.168.137.101:6443 --token k73e80.otf7kbdnbxvc9qvk \
+        --discovery-token-ca-cert-hash sha256:76507fe082ede68174b6e324f3c72dd0bfd70b78a186c7b46efa26fbf893fd74
+
+---------------------------------------------------------------------------------------------------
+
+
+8. 쿠버네티스 클러스터에 조인하기 위한 명령어 구문을 저장해둔다.
+
+# cat > token.sh
+kubeadm join 192.168.137.101:6443 --token k73e80.otf7kbdnbxvc9qvk \
+        --discovery-token-ca-cert-hash sha256:76507fe082ede68174b6e324f3c72dd0bfd70b78a186c7b46efa26fbf893fd74
+
+
+
+9. root 사용자가 쿠버네티스 클러스터의 API에 접근할 수 있도록 인증하기 위해서 kubeconfig 파일의 위치를  KUBECONFIG 쉘 변수에 설정한다.
+
+# vi ~/.bashrc
+export KUBECONFIG=/etc/kubernetes/admin.conf    맨 아래 줄에 추가한다.
+# source ~/.bashrc 
+# echo $KUBECONFIG 
+/etc/kubernetes/admin.conf
+
+
+10. Pod가 서로 통신 할 수 있도록 CNI (Container Network Interface) 기반 Pod 네트워크 추가 기능 구성한다.
+ 네트워크가 설치되기 전에 클러스터 DNS (CoreDNS)가 시작되지 않는다.
+
+1) calico (https://docs.projectcalico.org/getting-started/kubernetes/self-managed-onprem/onpremises)
+# curl https://docs.projectcalico.org/manifests/calico.yaml -O
+# kubectl apply -f calico.yaml
+
+2) weave net (https://www.weave.works/docs/net/latest/kubernetes/kube-addon/) 
+# kubectl apply -f "https://cloud.weave.works/k8s/net?k8s-version=$(kubectl version | base64 | tr -d '\n')"
+
+
+
+
+
+11. [마스터 노드에서만 실행] 클러스터 구성 상태 확인 
+
+# kubectl get nodes
+# kubectl get pods --all-namespaces
+
+
+
+
+12. [마스터 노드에서만 실행] 생성한 # kubeadm join 구문이 든 쉘 스크립트를 워커 노드로 복사한다. 
+
+
+#  scp token.sh worker1:/root/token.sh            <----
+#  scp token.sh worker2:/root/token.sh
+
+
+13. [워커 노드에서만 실행] 복사된 스크립트를 실행하여 클러스터에 조인한다. 
+
+worker1, worker2 # chmod +x token.sh 
+worker1, worker2 # ./token.sh 
+This node has joined the cluster:
+* Certificate signing request was sent to apiserver and a response was received.
+* The Kubelet was informed of the new secure connection details.
+
+Run 'kubectl get nodes' on the control-plane to see this node join the cluster.
+
+
+
+14. [마스터 노드에서만 실행] 클러스터 조인 상태 확인 
+ # kubectl cluster-info
+Kubernetes control plane is running at https://192.168.137.101:6443
+CoreDNS is running at https://192.168.137.101:6443/api/v1/namespaces/kube-system/services/kube-dns:dns/proxy
+
+# kubectl get nodes
+NAME      STATUS   ROLES                       AGE    VERSION
+master     Ready      control-plane,master   13d     v1.21.0
+worker1    Ready     <none>                    13d     v1.21.0
+worker2    Ready     <none>                    13d     v1.21.0
+
+
+
+-----------------------------------------------
+!! 중간에 오류 발생시  참조 !!!
+master #  kubeadm reset
+master # rm -rf /var/lib/cni/
+master # systemctl daemon-reload
+
+worker1, worker2 # kubeadm  reset 
+
+-----------------------------------------------
+
+
+

@@ -1,0 +1,314 @@
+유 미 (takytaky@empas.com) 
+유닉스,리눅스, 가상화,docker+k8s,cloud 
+
+
+LG전자 사전 설치프로그램(실습 파일) 다운로드  --> 압축 해제 
+www.virtualbox.org 
+	--> Downoads
+	--> 6.1.30 virtualbox 
+	--> extenstion pack download 
+	--> 재부팅 
+
+
+실습 환경 구성 
+=================
+1) VirtualBox-6.1.26-145957-Win.exe 설치 
+
+2) Oracle_VM_VirtualBox_Extension_Pack-6.1.26 설치 
+Oracle VM VirtualBox 관리자 
+파일 
+	--> 환경 설정 
+	--> 확장 --> [+] 
+	--> Oracle_VM_VirtualBox_Extension_Pack-6.1.26 선택
+	--> 열기 
+	--> 설치 --> 스크롤 다운 --> 동의합니다. --> 예 
+	--> 확인 
+
+(Optional) 기본 가상 머신 폴더 변경 (C:\Users\계정\VirtualBox VMs\) 
+Oracle VM VirtualBox 관리자 
+파일 
+	--> 환경설정
+	--> 일반 
+	--> D:\k8s 
+
+3) 가상머신 import 
+Oracle VM VirtualBox 관리자 
+파일 
+	--> 가상 시스템 가져오기 
+	--> 파일(탐색기) --> master_k8s.ova 선택 --> 다음 
+	
+	이름:  master
+	MAC 주소 정책 : 모든 네트워크 어댑터의 새 MAC 주소 생성
+
+	--> 가져오기
+	
+
+4) 네트워크 설정 
+Oracle VM VirtualBox 관리자 
+파일 
+	--> 환경 설정 
+	--> 네트워크 --> [+] --> NatNetwork --> 확인 
+
+master(가상머신)선택 
+	--> 네트워크 
+	--> 다음에 연결됨 : 호스트 전용 어댑터 --수정--> NAT 네트워크 
+	      이름 : NatNetwork 
+	--> 확인 
+
+	--> 시작 
+
+5) 가상 머신 부팅 후 로그인 
+
+ID : worker1
+PW : ubuntu 
+
+
+6) 화면 해상도 설정 
+화면 상단 --> 배터리 --> 드라이버 & 스패너(Settings , 제어판)
+
+	Power --> Blank screen --> Never
+	Devices --> Resolution --> 1600 x 1200  -->Apply 클릭 
+			--> Keep Changes? 
+
+7) 가상 머신 고정 IP 설정 
+
+ID : root 
+PW : ubuntu 
+
+마우스 우클릭 --> open terminal 
+$ su - root   
+
+# cd /etc/netplan 
+# nano 00-installer-config.yaml 
+	addresses: [192.168.137.101/24]
+		--> addresses: [10.0.2.101/24]
+
+	gateway4: 192.168.137.1 
+		--> gateway4: 10.0.2.1 
+
+ctrl+o --> enter (저장)
+ctrl+x   (저장)
+
+# cat 00-installer-config.yaml 
+# netplan apply              <--- yaml 파일 net 설정 
+
+# ip addr (확인)
+enp0s3 
+	inet  10.0.2.101/24 
+
+# ip route  (확인) 
+default via 10.0.2.1 
+
+# ping google.com
+or 
+# ping 8.8.8.8 
+
+
+8) root ssh 연결 허용 
+
+# vi /etc/ssh/sshd_config 
+	#PermitRootLogin prohibit-password 
+	--> PermitRootLogin yes 
+:wq
+
+# systemctl restart sshd 
+
+worker1 / ubuntu 
+$ su  - root 
+ubuntu
+
+
+
+9) virtualbox 포트포워딩 설정 
+
+Oracle VM VirtualBox 관리자 
+파일 
+	--> 환경설정
+	--> 네트워크 --> NatNetwork 선택 --> 톱니바퀴 --> 포트포워딩 --> [+]
+
+이름      프로토콜       호스트IP       호스트포트     게스트IP     게스트포트
+master     TCP         192.168.56.1       101          10.0.2.101       22
+
+	--> 확인 *  3
+
+
+10) putty 연결 
+putt 프로그램 실행 
+	HostName :  192.168.56.1     Port: 101
+
+	Terminal --> Keyboard --> The Backspace Key (Control-H) 변경
+	Window --> Appearance --> Font Settings --> Change 
+	Window --> Colours --> Default Forground(글자색), Default Background(배경색)
+	Session --> Saved Sessions : master  --> Save 
+
+
+master 정보로 연결 
+login : root
+password : ubuntu
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+chroot 실습 
+=================
+# pwd 
+/root 
+
+# mkdir -p   /root/newroot/{bin,lib,lib64}
+# apt install tree
+
+# tree .
+.
+├── docker_lab.tgz
+├── k8s_lab.tgz
+└── newroot
+    ├── bin
+    ├── lib
+    └── lib64
+
+/   <-----       /root/newroot
+
+/bin/bash  <----   /root/newroot/bin/bash 
+
+# chroot /root/newroot  /bin/bash
+	--> 오류 
+
+# cp /bin/bash   /root/newroot/bin/bash
+# cp /bin/ls   /root/newroot/bin/ls
+
+# ldd /bin/bash
+# mkdir /root/newroot/lib/x86_64-linux-gnu/
+
+# cp /lib/x86_64-linux-gnu/libtinfo.so.5 /root/newroot/lib/x86_64-linux-gnu/libtinfo.so.5
+# cp /lib/x86_64-linux-gnu/libdl.so.2 /root/newroot/lib/x86_64-linux-gnu/libdl.so.2
+# cp /lib/x86_64-linux-gnu/libc.so.6 /root/newroot/lib/x86_64-linux-gnu/libc.so.6
+# cp /lib64/ld-linux-x86-64.so.2  /root/newroot/lib64/ld-linux-x86-64.so.2
+
+# ldd /bin/ls 
+
+# cp /lib/x86_64-linux-gnu/libselinux.so.1  /root/newroot/lib/x86_64-linux-gnu/libselinux.so.1
+# cp /lib/x86_64-linux-gnu/libc.so.6 /root/newroot/lib/x86_64-linux-gnu/libc.so.6
+# cp /lib/x86_64-linux-gnu/libpcre.so.3 /root/newroot/lib/x86_64-linux-gnu/libpcre.so.3
+# cp /lib/x86_64-linux-gnu/libdl.so.2  /root/newroot/lib/x86_64-linux-gnu/libdl.so.2
+# cp /lib64/ld-linux-x86-64.so.2  /root/newroot/lib64/ld-linux-x86-64.so.2
+# cp /lib/x86_64-linux-gnu/libpthread.so.0 /root/newroot/lib/x86_64-linux-gnu/libpthread.so.0
+
+
+# chroot /root/newroot  /bin/bash
+bash-4.4# pwd
+/
+bash-4.4# exit 
+
+
+
+
+
+
+NET NS 실습 
+=======================
+# ip addr 
+	--> enp0s3 (10.0.2.101/24) 
+
+# ip netns add guestnet 
+	--> 추가적인 NET ns 생성 
+# ip netns exec guestnet ip link 
+# ip netns exec guestnet ip link set lo up 	
+	--> guestnet Net ns 에서 loopback 인터페이스 활성화 
+
+# ip link add host type veth peer name guest 
+	--> default net ns 에 host(veth, virtual ethernet) <-------> guest 
+# ip link 
+	3: guest@host: 
+	4: host@guest: 
+
+# ip link set guest netns guestnet
+	--> guest 인터페이스의 NET ns 를 guestnet 변경 
+
+# ip link 
+	4: host@if3  (default NET NS) 
+# ip netns exec guestnet ip link
+	3: guest@if4:           (guestnet NET NS) 
+
+(host 인터페이스 IP설정)
+# ip link set host up	
+	--> default NET NS host 인터페이스를 활성 
+
+# ip addr add 1.1.1.1/24  dev  host 
+	--> host interface IP 추가 
+	--> dev (device nic 이름)
+ 
+# ip addr show dev host 
+	4: host@if3:
+		inet 1.1.1.1/24 scope global host
+
+(guest 인터페이스 IP설정)
+
+# ip netns exec guestnet ip link
+# ip netns exec guestnet ip link set guest up
+	--> guestnet NET NS의 guest 인터페이스를 활성화 
+
+# ip netns exec guestnet ip addr add 1.1.1.2/24 dev guest
+	--> guestnet NET NS 의 guest 인터페이스 IP 설정 
+
+# ip netns exec guestnet ip addr show dev guest
+	3: guest@if4: 
+		    inet 1.1.1.2/24 
+		
+	--> guestnet NET NS 의 guest 인터페이스 설정한 IP 확인 
+
+# ip netns del guestnet
+	--> uestnet NET NS 임의 삭제 
+
+
+
+docker 설치 전 확인하기 
+=================
+
+1) 커널 버전 
+# uname -r
+4.15.0-140-generic
+
+2) 배포판 버전 
+# cat /etc/os-release
+NAME="Ubuntu"
+VERSION="18.04.5 LTS (Bionic Beaver)"
+
+14.04 LTS ( Long Term Support) 
+16.04
+18.04
+20.04 
+
+
+# docker --version
+	--> 설치 확인 
+
+특정 버전 도커 설치 
+==============
+# apt-cache madison docker-ce | head
+ docker-ce | 5:20.10.11~3-0~ubuntu-bionic | https://download.docker.com/linux/ubuntu bionic/stable amd64 Packages
+ docker-ce | 5:20.10.10~3-0~ubuntu-bionic | https://download.docker.com/linux/ubuntu bionic/stable amd64 Packages
+ docker-ce | 5:20.10.9~3-0~ubuntu-bionic | https://download.docker.com/linux/ubuntu bionic/stable amd64 Packages
+ docker-ce | 5:20.10.8~3-0~ubuntu-bionic | https://download.docker.com/linux/ubuntu bionic/stable amd64 Packages
+ docker-ce | 5:20.10.7~3-0~ubuntu-bionic | https://download.docker.com/linux/ubuntu bionic/stable amd64 Packages
+
+# apt-get install -y docker-ce=5:20.10.11~3-0~ubuntu-bionic
+
+
+
+
+
+
+
+
+

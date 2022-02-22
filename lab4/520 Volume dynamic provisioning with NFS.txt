@@ -1,0 +1,283 @@
+==============================
+ Dynamic Provisioning (with NFS) 
+==============================
+
+
+
+
+
+
+----------------------------------------------------------------------------------
+*** k8s  1.20.x 이후에는 아래 작업을 추가로 해야 합니다. 
+
+Master Node에서 kube-apiserver.yaml에 아래 옵션을 추가
+$ vi /etc/kubernetes/manifests/kube-apiserver.yaml
+.....
+spec:
+  containers:
+  - command:
+    - kube-apiserver
+    - --advertise-address=10.0.2.101
+    - --feature-gates=RemoveSelfLink=false         <------ 다음 라인 추가 후 될때까지 대기합니다.
+    - --allow-privileged=true
+    - --authorization-mode=Node,RBAC
+
+----------------------------------------------------------------------------------
+
+
+1) NFS 서버 패키지 설치  
+
+# apt install -y  nfs-kernel-server rpcbind 
+# systemctl status rpcbind nfs-kernel-server
+# systemctl enable rpcbind nfs-kernel-server
+
+2) NFS 서버 exports 설정 
+# mkdir /k8s_share 
+# vi /etc/exports 
+/k8s_share   *(rw,sync,no_root_squash,no_subtree_check)
+
+rw : 읽기, 쓰기 가능
+sync : 파일 시스템이 변경되면 즉시 동기화.
+ no_root_squash : 클라이언트의 root와 서버의 root를 동일하게 함
+
+
+# exportfs -avr 
+# showmount -e localhost
+Export list for localhost:
+/k8s_share 192.168.137.*
+
+
+# systemctl start rpcbind nfs-kernel-server
+
+3) 모든 워커 노드에 nfs client 설정하기 
+
+worker1, worke2 # apt install -y nfs-common
+worker1, worke2 # mkdir /test 
+worker1, worke2 # mount 192.168.137.101:/k8s_share  /test
+
+
+---------------------------------------------------------------------------------------------------------------------------------------------
+
+4) sevice account 생성 
+NFS Provisioner Pod 가 쿠버네티스 클러스터에 PV를 배포(생성)할 수 있는 권한이 필요
+PV를 배포할 수 있는 ClusterRole --> 이 롤을 가진 Service Account 를 생성 
+
+# rbac.yaml 
+kind: ServiceAccount
+apiVersion: v1
+metadata:
+  name: nfs-pod-provisioner-sa
+
+---
+
+kind: ClusterRole 
+apiVersion: rbac.authorization.k8s.io/v1 
+metadata:
+  name: nfs-provisioner-clusterRole
+rules:
+  - apiGroups: [""] # rules on persistentvolumes
+    resources: ["persistentvolumes"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list", "watch", "update"]
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["storageclasses"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "update", "patch"]
+
+---
+
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: nfs-provisioner-rolebinding
+subjects:
+  - kind: ServiceAccount
+    name: nfs-pod-provisioner-sa
+    namespace: default
+roleRef: 
+  kind: ClusterRole
+  name: nfs-provisioner-clusterRole # name defined in clusterRole
+  apiGroup: rbac.authorization.k8s.io
+
+---
+
+kind: Role
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: nfs-pod-provisioner-otherRoles
+rules:
+  - apiGroups: [""]
+    resources: ["endpoints"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+
+--- 
+
+kind: RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: nfs-pod-provisioner-otherRoles
+subjects:
+  - kind: ServiceAccount
+    name: nfs-pod-provisioner-sa 
+    namespace: default
+roleRef:
+  kind: Role
+  name: nfs-pod-provisioner-otherRoles
+  apiGroup: rbac.authorization.k8s.io
+
+
+
+
+
+5) NFS Provisioner Deployment 배포 
+NFS Server를 Dynamic Provisioning 으로 사용할 수있도록 해주는 NFS Provisioner Pod를 Deploymemt로 배포 
+
+# vi provisioner.yaml 
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: nfs-pod-provisioner
+spec:
+  selector:
+    matchLabels:
+      app: nfs-pod-provisioner
+  replicas: 1
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: nfs-pod-provisioner
+    spec:
+      serviceAccountName: nfs-pod-provisioner-sa 
+      containers:
+        - name: nfs-pod-provisioner
+          image: quay.io/external_storage/nfs-client-provisioner:latest
+          volumeMounts:
+            - name: nfs-provisioner
+              mountPath: /persistentvolumes
+          env:
+            - name: PROVISIONER_NAME 
+              value: nfs-test 
+            - name: NFS_SERVER 
+              value: 192.168.137.101                                <-----------운영환경에 맞게 수정합니다.(10.0.2.101)
+            - name: NFS_PATH 
+              value: /k8s_share
+      volumes:
+       - name: nfs-provisioner 
+         nfs:
+           server: 192.168.137.101                                  <-------------운영환경에 맞게 수정합니다.(10.0.2.101)
+           path: /k8s_share
+
+
+6) StorageClass 생성 
+Dynamic Provisioning을 위한 StorageClass 생성 
+
+# vi storageclass.yaml
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: nfs-storageclass 
+provisioner: nfs-test 
+parameters:
+  archiveOnDelete: "false"
+
+
+
+7) PVC 생성 
+
+먼저 생성한 StorageClass를 바라보는 PVC생성 
+
+# pvc.yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pvc-nfs-dynamic
+spec:
+  storageClassName: nfs-storageclass
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 256Mi
+
+
+
+8) Deployment 생성 
+# deploy-nfs.yaml 
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: deploy-nfs-dynamic
+  labels:
+    app: nfs-dynamic
+spec:
+  replicas: 4
+  selector:
+    matchLabels:
+      app: nfs-dynamic
+  template:
+    metadata:
+      labels:
+        app: nfs-dynamic
+    spec:
+      containers:
+      - name: nfs-dynamic
+        image: takytaky/app:hostname
+        ports:
+        - containerPort: 8080
+        volumeMounts:                    
+          - mountPath: /tmp
+            name: volume-nfs        
+      volumes:                           
+      - name: volume-nfs            
+        persistentVolumeClaim:           
+          claimName: pvc-nfs-dynamic
+
+
+9) 생성한 yaml을 통해서 순서대로 객체 생성하기
+
+
+# kubectl apply -f rbac.yaml
+serviceaccount/nfs-pod-provisioner-sa created
+clusterrole.rbac.authorization.k8s.io/nfs-provisioner-clusterRole created
+clusterrolebinding.rbac.authorization.k8s.io/nfs-provisioner-rolebinding created
+role.rbac.authorization.k8s.io/nfs-pod-provisioner-otherRoles created
+rolebinding.rbac.authorization.k8s.io/nfs-pod-provisioner-otherRoles created
+
+# kubectl apply -f provisioner.yaml
+# kubectl get deploy,pods
+NAME                                  READY   UP-TO-DATE   AVAILABLE   AGE
+deployment.apps/nfs-pod-provisioner   1/1     1            1           34s
+
+NAME                                       READY   STATUS    RESTARTS   AGE
+pod/nfs-pod-provisioner-7dccdb66c5-gvpjd   1/1     Running   0          34s
+
+
+# kubectl apply -f storageclass.yaml
+storageclass.storage.k8s.io/nfs-storageclass created
+# kubectl get storageclass
+NAME               PROVISIONER   RECLAIMPOLICY   VOLUMEBINDINGMODE   ALLOWVOLUMEEXPANSION   AGE
+nfs-storageclass   nfs-dynamic   Delete          Immediate           false                  9s
+
+
+
+# kubectl apply -f pvc.yaml
+persistentvolumeclaim/pvc-nfs-dynamic created
+# kubectl get pvc
+NAME              STATUS    VOLUME   CAPACITY   ACCESS MODES   STORAGECLASS   AGE
+pvc-nfs-dynamic   Pending                                      nfs-dynamic    9s
+
+
+# kubectl apply -f deploy-nfs.yaml
+
+# watch -n 1 kubectl get pvc,pv,deploy,pods -o wide 
+	---> pv가 자동으로 생성되는지 확인 
+
+
+
+<완료>

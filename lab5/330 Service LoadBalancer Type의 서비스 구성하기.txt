@@ -1,0 +1,43 @@
+
+
+LoadBalancer Type의 서비스 구성하기
+
+
+# kubectl create namespace metallb-system 
+# kubectl apply -f https://raw.githubusercontent.com/google/metallb/v0.8.3/manifests/metallb.yaml
+
+
+# vi metallb_test.yaml
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  namespace: metallb-system
+  name: config
+data:
+  config: |
+    address-pools:
+    - name: my-ip
+      protocol: layer2
+      addresses:
+      - 10.0.2.200-10.0.2.209
+
+# kubectl apply -f metallb_test.yaml
+
+
+# cat loadbalancer.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: loadbalancer-hostname-service
+spec:
+  type: LoadBalancer
+  selector:
+    app: hostname-server
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 80
+
+
+

@@ -1,0 +1,212 @@
+주기적으로 상태 확인 
+===============
+watch -n 1 kubectl get pods -o wide 
+
+
+
+pause 컨테이너 실습 
+================
+worker1 진행 
+
+root@worker1:~# docker ps -a | grep app_
+83f29a091049   db2754e151ed             "node app.js"            About an hour ago   Up About an hour                     k8s_app-container_app_default_d5376d0f-0f26-4965-94c6-4958d7604728_0
+6a56b456305a   k8s.gcr.io/pause:3.4.1   "/pause"                 About an hour ago   Up About an hour                     k8s_POD_app_default_d5376d0f-0f26-4965-94c6-4958d7604728_0
+
+
+root@worker1:~# docker top k8s_POD_app_default_d5376d0f-0f26-4965-94c6-4958d7604728_0
+UID                 PID                 PPID                C                   STIME               TTY                 TIME                CMD
+root                422                 388                 0                   Nov30               ?                   00:00:00            /pause
+
+root@worker1:~# docker top k8s_app-container_app_default_d5376d0f-0f26-4965-94c6-4958d7604728_0
+UID                 PID                 PPID                C                   STIME               TTY                 TIME                CMD
+root                557                 529                 0                   Nov30               ?                   00:00:00            node app.js
+
+
+root@worker1:~# ls -l /proc/422/ns/net
+lrwxrwxrwx 1 root root 0 Nov 30 23:27 /proc/422/ns/net -> 'net:[4026532281]'
+
+root@worker1:~# ls -l /proc/557/ns/net
+lrwxrwxrwx 1 root root 0 Dec  1 00:40 /proc/557/ns/net -> 'net:[4026532281]'
+
+root@worker1:~# kill -9 557
+
+----> 종료된 pod 재실행 시 이전과 동일한 IP 설정 (pause container의 NET NS를 공유해서 사용) 
+--------------------------------------------
+
+
+
+static pod 실습 
+==============
+
+worker1 에서 진행 
+
+root@worker1:~# mkdir /etc/static.d
+root@worker1:~# scp master:/root/k8s_lab/pod/app.yaml   /etc/static.d/app.yaml
+root@worker1:~# vi /var/lib/kubelet/config.yaml
+	# staticPodPath: /etc/kubernetes/manifests
+	staticPodPath: /etc/static.d 
+:wq
+
+root@worker1:~# systemctl restart kubelet
+
+
+master # kubectl get pods -o wide 
+--> app-worker2 (pod명에 노드명이 추가되어서 실행 확인 ) 
+
+(원복하기) 
+# vi /var/lib/kubelet/config.yaml
+	staticPodPath: /etc/kubernetes/manifests
+
+--------------------------------------------------------
+
+
+
+
+네임스페이스 생성/삭제
+=================
+master # kubectl create namespace cpu-example   (생성)
+master # kubectl get ns  <-- 생성된 namespace조회 
+
+master # kubectl delete pods -n cpu-example --all
+master # kubectl delete namespace cpu-example (삭제)
+
+
+
+도커 컨테이너별 자원 사용 정보 확인 
+===========================
+worker1 #  docker stats
+
+worker1 #  docker stats --no-stream 
+
+
+
+
+레플리케이션 컨트롤러와 레플리카셋 
+========================
+
+지속적으로 정해진 수의 파드 복제본이 실행되도록 관리 
+
+레플리케이션 컨트롤러 
+	- 등호기반 selector 
+	- 배포(RollingUpdate) 지원 
+
+레플리카셋
+	- 등호기반 + 집합 기반 selector
+	- RollingUpdate <=== 디플로이먼트(Deployment) 
+
+
+
+레플리카셋 + 디플로이먼트 
+
+
+
+
+
+
+선택적으로 replicaset scale-in 
+====================
+master # kubectl apply -f rs-nginx.yaml
+
+master # kubectl scale rs rs-nginx --replicas=4
+master # kubectl delete rs --cascade=orphan rs-nginx
+
+
+master # kubectl delete pod rs-nginx-7gdvf
+master # kubectl apply -f rs-nginx.yaml
+
+
+
+
+디플로이먼트 롤아웃(배포) 방법 3가지 
+========================
+1) kubectl set image 
+--------------------------------------
+master # kubectl set image deployment deploy-nginx deploy-nginx=nginx:1.16.0
+
+
+
+2) kubectl edit (실시간 속성 변경) 
+--------------------------------------
+master # kubectl edit deploy deploy-nginx
+    spec:
+      containers:
+      - image: nginx:1.18.0
+
+:wq
+
+3) deploy-nginx.yaml 편집 -------> # kubectl apply 
+--------------------------------------
+# vi deploy-nginx.yaml 
+ annotations:
+    kubernetes.io/change-cause: version 1.19.0
+
+......
+    spec:
+      containers:
+      - name: deploy-nginx
+        image: nginx:1.19.0
+
+:wq
+
+# kubectl apply -f deploy-nginx.yaml 
+
+
+
+
+
+
+
+
+
+taint -- tolerations : 특정 노드를 특정 목표(용도) 제한
+====================================
+# kubectl describe node master 
+Taints:             node-role.kubernetes.io/master:NoSchedule
+
+# cat daemonset-app.yaml
+.......
+     tolerations:
+      - key: node-role.kubernetes.io/master
+        effect: NoSchedule
+
+===> 데몬셋의 파드가 master 노드에도 실행되기 위해서 tolerations 추가 
+
+
+
+
+
+
+
+daemonset updateStrategy==OnDelete 
+=============================
+master # kubectl edit daemonsets daemonset-app
+
+  updateStrategy:
+    type: OnDelete
+
+master # kubectl set image daemonset daemonset-app daemonset-app=takytaky/app:v3
+ 
+master # kubectl delete pod daemonset-app-hqgbd  (master 노드에 실행 중인 파드) 
+master # kubectl delete pod daemonset-app-8dmvt  (worker1 노드에 실행 중인 파드)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
